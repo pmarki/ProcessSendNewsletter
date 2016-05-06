@@ -1,0 +1,42 @@
+<?php namespace ProcessWire;
+
+/**
+ * Send newsletter emails using built-in mail
+ * @param  string $title newsletter subject
+ * @param  string $html newsletter html body
+ * @param  string $plain newsletter plain body
+ * @param  array subscribers array with key email, name, link
+ * @param  array $credentials = array('name' sent from
+ *						'email' sent from
+ *						'pass' password or api key
+ * @return mixed  true on success or string with error message
+ *
+ */
+function send($title, $html, $plain, $subscribers, $credentials) {
+	
+	$mail = wireMail();
+	$mail->from($credentials['email'], $credentials['name']); 
+	$mail->subject($title); 
+	//password or api key would be	$credentials['pass']);
+	$msg = "";
+	foreach ($subscribers as $item) {
+		$mail->to($item['email']);
+
+		$plain = str_replace("{{LINK}}", $item['link'], $plain);
+		$plain = str_replace("{{NAME}}", $item['name'], $plain);
+		$plain = str_replace("{{EMAIL}}", $item['email'], $plain);
+		$mail->body($plain);
+
+		$html = str_replace("{{LINK}}", $item['link'], $html);
+		$html = str_replace("{{NAME}}", $item['name'], $html);
+		$html = str_replace("{{EMAIL}}", $item['email'], $html);
+		$mail->bodyHTML($html); 
+
+		$result = $mail->send(); 
+		if (!$result) {
+			$msg .= $item['email']. " ";
+		}
+	}
+
+	return $msg ? "Unable to send to: ".$msg : true;
+}

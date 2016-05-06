@@ -1,0 +1,55 @@
+<?php namespace ProcessWire;
+
+/**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
+ * Receive request to send newsletter
+ * @param  string $title newsletter subject
+ * @param  string $html newsletter html body
+ * @param  string $plain newsletter plain body
+ * @param  array subscribers array with key email, name, link
+ * @param  array $credentials = array('name' sent from
+ *						'email' sent from
+ *						'pass' password or api key
+ * @return mixed  true on success or string with error message
+ *
+ */
+function send($title, $html, $plain, $subscribers, $credentials) {
+	
+	require("sendgrid-php/sendgrid-php.php");
+	$sendgrid = new \SendGrid($credentials['pass']);
+	$email = new \SendGrid\Email();
+
+	//sendgrid allows sending 1000 in one go
+	$array = array_chunk($subscribers, 1000); 
+	$out = true;
+	foreach ($array as $item) {
+		//prepare arrays: with emails, links, names
+		$emails =array();
+		$links = array();
+		$names = array();
+		foreach ($item as $key) {
+			$emails[] = $key['email'];
+			$links[] = $key['link'];
+			$names[] = $key['name'];
+		}
+
+		$email
+		    ->setFrom($credentials['email'])
+		    ->setSubject($title)
+		    ->setSmtpapiTos($emails)
+		    ->addSubstitution("{{LINK}}", $links)
+		    ->addSubstitution("{{NAME}}", $names)
+		    ->addSubstitution("{{EMAIL}}", $emails)
+		    ->setText($plain)
+		    ->setHtml($html);
+		
+		try {
+	    	$sendgrid->send($email);
+		} catch(\SendGrid\Exception $e) {
+	    	$out = $e->getCode() . "\n";
+	    	foreach($e->getErrors() as $er) {
+	        	$out .= $er. " | ";
+	    	}
+		}
+	}
+	return $out ;
+} 

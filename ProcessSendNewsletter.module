@@ -1,0 +1,902 @@
+<?php namespace ProcessWire;
+
+/**
+ * Send newsletter to sunbscribed users using sendgrid
+ * by Piotr Markiewicz
+ *
+ * ProcessWire 2.x 
+ * Copyright (C) 2014 by Ryan Cramer 
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ * 
+ * http://processwire.com
+ *
+ */
+
+class ProcessSendNewsletter extends Process implements ConfigurableModule {
+
+	const minVersion = '3.0.8';
+
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Send Newsletter', 
+			'summary' => 'Send newsletter to subscribed users.', 
+			'version' => 020, 
+			'icon' => 'paper-plane', 
+			'page' => array(
+				'name' => 'send-newsletter',
+				'parent' => 'setup',
+				),
+			'requires' => 'ProcessWire>=3.0.8'
+			);
+	}
+
+	//initial settings 
+	protected static $defaults = array(
+			'header' => 'Hi {{NAME}}, this is a new issue of our newsletter.',
+			'footer' => 'You have received this newsletter because you subscribed on our website.',
+			'unsubscribeText' => 'Click here to unsubscribe.',
+			'unsubscribeUrl' => '',
+			'senderRole' => "superuser",
+			'receiverRole' => "",
+			'backend' => "",
+			'useNames' => "",
+			'fromEmail' => "newsletter@yourdomain.com",
+			'fromName' => "My website newsletter",
+			'backendPass' => "",
+
+
+		);
+
+	//names of fields used during install
+	protected $templateName = 'SendNewsletter';
+	protected $fieldBody = 'Newsletter_history_body';
+	protected $fieldDetails = 'Newsletter_history_details';
+	protected $fieldActionButton = "Newsletter_history_action";
+
+	//values of fields used for creating newsletter
+	protected $title = "";
+	protected $body = "";
+	protected $actionText = "";
+	protected $actionLink ="";
+	protected $template ="";
+	protected $newsletterGroup = "";
+	protected $pageName = "";
+
+	protected static $status = array(
+			'SENT' 	=> 'SENT', 
+			'SAVED'	=> 'SAVED',
+			'ERROR' => 'ERROR'
+	);
+
+
+	/**
+	 * Initialize the newsletter module
+	 */
+	public function init() {
+		if(!$this->user->hasRole($this->config('senderRole')) ) throw new WirePermissionException("This module requires special access"); 
+
+		 $this->modules->get('JqueryWireTabs');
+		 $this->modules->get('JqueryMagnific');
+		 $this->config->scripts->add($this->config->urls->ProcessSendNewsletter . 'ProcessSendNewsletter.js');
+
+		parent::init();
+	}
+
+	/**
+	 * Ensure that everything is where we need it to be 
+	 *
+	 * Returns false if not. 
+	 *
+	 */
+	protected function setup() {
+
+		if (!$this->user->hasRole($this->config('senderRole'))  || !$this->user->hasPermission('newsletter-sender') ) {
+			$this->error("Sorry, but you can't send newsletters. Ask administrator for a permission");
+			return false;
+		}
+
+		return true;
+	}
+
+
+	/**
+	 * Build the initial form used for sending newsletters
+	 *
+	 */
+	protected function buildForm() {
+
+		$templateFileName = "";
+
+		//info about opened page
+		$form = $this->modules->get('InputfieldForm'); 
+		$form->attr('id', 'NewsletterModule');
+		if ($this->pageName) {
+			$title = $this->pages->get("name=".$this->pageName)->title;
+			$prepended = "<div id='NewsletterNotes' class='Inputfields'><div class='InputfieldHeader'>" .
+					"<p class='notes'><em>You are editing </em>" .($title ? $title : "<i>Untitled</i>")."</p>" .
+					"</div></div>";
+			$form->attr('prependMarkup', $prepended);
+		}
+
+		// First Tab - Main
+		$tab = new InputfieldWrapper();
+		$tab->attr('title', $this->_('Create')); 
+		$id = 'NewsletterMain';
+		$tab->attr('id', $id); 
+		$tab->class .= ' WireTab';
+
+		$f = $this->modules->get('InputfieldSelect'); 
+		$f->attr('name', 'newsletter_group'); 
+		$f->label = $this->_('Send to:'); 
+		$f->columnWidth = 30; 
+		foreach ($this->config('receiverRole') as $role) {
+			$arr = ($this->newsletterGroup == $role ?  array("selected" => 1) : array());
+			$count = $this->wire('users')->count("roles=" . $role);
+			$f->addOption($role, "$role - $count", $arr);
+		} 
+		//add all if there is more groups
+		if (count($this->config('receiverRole')) > 1) {
+			$arr = ($this->newsletterGroup == 'all' ?  array("selected" => 1) : array());
+			$count = $this->wire('users')->count("roles=" . implode("|", $this->config('receiverRole')));
+			$f->addOption('all', "all - $count", $arr);
+		}
+		$f->required = true; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldSelect'); 
+		$f->attr('name', 'newsletter_template'); 
+		$f->attr('value', $this->title);
+		$f->label = $this->_('Template'); 
+		$f->columnWidth = 30; 
+		$f->required = true; 
+		//find available templates
+		$files = scandir(dirname ( __FILE__ ) . "/templates");
+		foreach ($files as $file) {
+			//get file names and append selected where it should be
+			if (strpos($file, ".html") == true) {
+				$name = str_replace(".html", "", $file);
+				$template = str_replace(".html", "", $this->template);
+				$arr = ($template == $name ?  array("selected" => 1) : array());
+				$f->addOption($file, $name, $arr);
+				if ($templateFileName === "" || isset($arr['selected'])) {
+					$templateFileName = $file;
+				}
+			}
+
+		}
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldMarkup');
+		$f->attr('name', 'template_preview'); 
+		$f->value = "<img src='{$this->getTemplateImage($templateFileName)}' alt='Unable to find template preview'/>";
+		$f->label = $this->_('Template preview'); 
+		$f->columnWidth = 40; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldText'); 
+		$f->attr('name', 'newsletter_title'); 
+		$f->attr('value', $this->title);
+		$f->label = $this->_('Email subject'); 
+		$f->columnWidth = 50; 
+		$f->required = true; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldTextarea'); 
+		$f->attr('name', 'newsletter_body'); 
+		$f->attr('value', $this->body);
+		$f->label = $this->_('Email text'); 
+		$f->attr('rows', 5); 
+		$f->required = true; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldText'); 
+		$f->attr('name', 'newsletter_button_text'); 
+		$f->attr('value', $this->actionText);
+		$f->label = $this->_('Button text'); 
+		$f->columnWidth = 50; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldURL'); 
+		$f->attr('name', 'newsletter_button_link'); 
+		$f->attr('value', $this->actionLink);
+		$f->label = $this->_('Button link'); 
+		$f->columnWidth = 50; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldHidden');
+		$f->attr('name', 'newsletter_page_name'); 
+		$f->attr('value', $this->pageName); 
+		$form->add($f);
+
+		$f = $this->modules->get('InputfieldSubmit'); 
+		$f->attr('name', 'submit_send'); 
+		$f->attr('value', $this->_('Send')); 
+		$f->attr('onclick', "return confirm('" . $this->_('Send newsletter now?') . "')"); 
+		$f->icon = 'paper-plane';
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldSubmit'); 
+		$f->attr('name', 'submit_test'); 
+		$f->attr('value', $this->_('Test')); 
+		$f->attr('onclick', "return confirm('" . $this->_('Send test newsletter to '.$this->user->email.'?') . "')"); 
+		$f->icon = 'cogs';
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldSubmit'); 
+		$f->attr('name', 'submit_save'); 
+		$f->attr('value', $this->_('Save')); 
+		$f->icon = 'save';
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldButton'); 
+		$f->attr('name', 'submit_preview'); 
+		$f->attr('id', 'button_preview'); 
+		$f->attr('value', $this->_('Preview')); 
+		$f->icon = 'binoculars';
+		$f->href = $this->wire('page')->url . '?preview=1&modal=1'; 
+		$tab->add($f);
+
+		$form->add($tab);
+
+		//second tab - history
+		$tab = new InputfieldWrapper();
+		$tab->attr('title', $this->_('History')); 
+		$id = $this->className() . 'History';
+		$tab->attr('id', $id); 
+		$tab->class .= ' WireTab';
+
+		//table with newsletter history
+		$table = wire('modules')->get("MarkupAdminDataTable");
+		$table->setEncodeEntities(false);
+		$table->setCaption('<p class="description"><i class="fa fa-floppy-o" aria-hidden="true"></i> '.
+							'means that content was only saved, you can edit it and send, or delete<br>' .
+							'<i class="fa fa-envelope-o" aria-hidden="true"></i> '.
+							'means that newsletter was sent, you can use its content to create new one.</p>');
+		$table->headerRow( ["Subject", "Date", "To", "Total sent", "Template", "Author", "Actions"] );
+
+		$pageArr = $this->wire('page')->children("sort=-modified, limit=50");
+		$pagination = $pageArr->renderPager();
+		foreach($pageArr as $p){
+			//details are stored as a plain text devided by ## in such an order
+			//sent to, total sent, used template, status
+			//it changes the icon and available actions
+			$arr = explode("##", $p->get($this->fieldDetails));
+			$url = $this->wire('page')->url . "?pageName=" . $p->name;
+			if (!isset($arr[3])) continue;
+
+			switch ($arr[3]) {
+				case self::$status['SENT']:
+					$icon = '<i class="fa fa-envelope-o" aria-hidden="true"></i> ';
+					$edit = '<a href="'.$url.'&createNew=1" title="Re-use its content"><i class="fa fa-undo"></i></a>';
+					break;
+				case self::$status['SAVED']:
+					$icon = '<i class="fa fa-floppy-o" aria-hidden="true"></i> ';
+					$edit = '<a href="'.$url.'" title="Edit and send"><i class="fa fa-pencil-square-o"></i></a>';
+					break;
+				case self::$status['ERROR']:
+					$icon = '<i class="fa fa-flash" aria-hidden="true"></i> ';
+					$edit = '<a href="'.$url.'" title="Edit and send"><i class="fa fa-pencil-square-o"></i></a>';
+					break;
+				default:
+					$icon = "";
+					$edit = "";
+			}
+
+			//append preview button
+			$url = $this->wire('page')->url . "?detailsPageName=" . $p->name . "&modal=1";
+			$edit .= '&nbsp;<a class="NewsletterDetails" href="'.$url.'" title="Show details"><i class="fa fa-binoculars"></i></a>';
+
+			//append delete button but do not allow to trash current page and sent newsletters
+			if ($p->name !== $this->pageName && $arr[3] !== self::$status['SENT']) {
+				$url = $this->wire('page')->url . "?trashPageName=" . $p->name;
+				$edit .= '&nbsp;<a class="NewsletterTrashPage"  href="'.$url.'" title="Delete"><i class="fa fa-trash-o"></i></a>';
+			}
+
+		  	$data = array(
+		    	$icon . ($p->title ? $p->title : "<i>Untitled</i>"),
+		    	date("F j, Y", $p->modified),
+		    	$arr[0],
+		    	$arr[1],
+		    	$arr[2],
+		    	$p->modifiedUser->name,
+		    	$edit
+		  	);
+		  	$table->row($data);
+		}
+
+		//add button to create empty newsletter
+		$table->action(array(
+			'New' => wire('page')->url,
+		));
+
+		$table = $table->render() . $pagination;
+
+		$f = $this->modules->get('InputfieldMarkup'); 
+		$f->attr('name', 'newsletter_history'); 
+		$f->value = $table;
+		$tab->add($f);
+
+		$form->add($tab);
+		
+		return $form;
+	}
+
+	/**
+	 * render newslleter form
+	 *
+	 */
+	protected function renderNewsletter() {
+		$form = $this->buildForm();
+		$note = "<p class='detail'>" . "</p>";
+
+		return $form->render() . $note;
+	}
+
+
+	public function ___execute() {
+
+		if (!$this->setup()) return; 
+
+		if ($this->input->post('submit_send')) {
+			$this->fillFields();
+			$out = $this->processSend(false);
+			return $out; 
+		} else 	if ($this->input->post('submit_test')) {
+			$this->fillFields();
+			$out = $this->processSend(true);
+			return $out; 
+		//on select template change
+		} else if ($this->input->post('templateName')) {
+			return $this->getTemplateImage($this->input->post('templateName'));
+		//preview newsletter in popup
+		} else if ($this->input->get('preview')) {
+			$this->fillFields();
+			return $this->renderNewsletterPreview($this->input->get('template'),
+												$this->input->get('title'));
+		//save text as a page
+		} else if ($this->input->post('submit_save')) {
+			$this->fillFields();
+			$this->saveNewsletterPage(self::$status['SAVED']);
+			$this->session->redirect($this->page->url . "?pageName=".$this->pageName);
+		//load saved newsletter
+		} else if ($this->input->get('pageName')) {
+			$this->loadSavedPage($this->input->get('pageName'));
+			//prevent form resaving at the same name
+			if ($this->input->get('createNew')) {
+				$this->pageName = 0;
+			}
+			return $this->renderNewsletter();
+
+		} else if ($this->input->get('trashPageName')) {
+			$this->deletePage($this->input->get('trashPageName'));
+			return 'true';
+		} else if ($this->input->get('detailsPageName')) {
+			return $this->showPageDetails($this->input->get('detailsPageName'));
+
+		} else {
+			return $this->renderNewsletter();
+		}
+	}
+
+	/**
+	 * Save inputs to variables
+	 *
+	 */
+	protected function fillFields() {
+		$this->title = ($this->input->post('newsletter_title') ? 
+					$this->input->post->text('newsletter_title') : $this->input->get->text('newsletter_title') );
+		$this->body = ($this->input->post('newsletter_body') ? 
+					$this->input->post->purify('newsletter_body') : $this->input->get->purify('newsletter_body') );
+		$this->actionText = ($this->input->post('newsletter_button_text') ? 
+							$this->input->post->text('newsletter_button_text') : $this->input->get->text('newsletter_button_text') );
+		$this->actionLink = ($this->input->post('newsletter_button_link') ? 
+							$this->input->post->url('newsletter_button_link') : $this->input->get->url('newsletter_button_link') );
+		$this->template = ($this->input->post('newsletter_template') ? 
+							$this->input->post->text('newsletter_template') : $this->input->get->text('newsletter_template') );
+		$this->newsletterGroup = ($this->input->post('newsletter_group') ? 
+							$this->input->post->text('newsletter_group') : $this->input->get->text('newsletter_group') );
+		$this->pageName = ($this->input->post('newsletter_page_name') ? 
+							$this->input->post->pageName('newsletter_page_name') : $this->input->get->pageName('newsletter_page_name') );
+	}
+
+	/**
+	 * Merge template with a text and send newsletter using provided backend
+	 * @param  bool $test whether email should be sent only to the current user
+	 *
+	 */
+	protected function processSend($test = true) {
+		//recipients can be in one or many groups
+		if ($this->wire('input')->post('newsletter_group') === 'all' ) {
+			$roles = implode("|", $this->config('receiverRole'));
+		} else {
+			$roles = $this->wire('input')->post('newsletter_group');
+		}
+		if ($test) {
+			$recipients = $this->users->find("email=". $this->user->email);
+		} else {
+			$recipients = $this->wire('users')->find("roles=" . $roles . ", email!=''");
+			if (!$recipients) return "<h2>Subscribers list is empty</h2>";
+		}
+
+		$subscribers = array();
+		//create array of subscribers and links to unsubscribe
+		foreach ($recipients as $recipient) {
+			$r = array('email'	=> $recipient->email, 
+						'link'	=> $recipient[$this->config('unsubscribeUrl')],
+						'name'	=> ($this->config('useNames') ? $recipient->name : "" ) 
+			);
+			$subscribers[] = $r;
+		}
+		//save newsletter
+		
+
+		//prepare text to be sent
+		$plain = $this->fillTemplateToPlain();
+		$html = $this->fillHTMLTemplate();
+		
+		//call a send backend 
+		$file = dirname( __FILE__ ) . "/" . $this->config('backend');
+		if (!file_exists($file)) return "Unable to find backend file.";
+		require($file);
+		if (!function_exists('ProcessWire\send')) return "Provided backend file is corrupted.";
+
+		$credentials = array('name' => $this->config('fromName'),
+							'email' => $this->config('fromEmail'),
+							'pass' => $this->config('backendPass'));
+
+  		$result = send($this->title, $html, $plain, $subscribers, $credentials);
+
+		//in test case go back to the same page
+		if ($test) {
+			if ($result) {
+				$this->message("Test message was sent to you at " . $this->user->email);
+			} else {
+				$this->message("Error sending newsletter: " .$result);
+			}
+			$this->fillFields();
+			return $this->renderNewsletter();
+		}
+		if ($result !== true) {
+			if (!$test)	$this->saveNewsletterPage(self::$status['ERROR']);
+			return $this->_("<h2>Error sending newsletter </h2>") .$result;
+		}
+		if (!$test)	$this->saveNewsletterPage(self::$status['SENT']);
+		return $this->_("<h2>Sent successfully to subscribers</h2>");
+	}
+
+
+	/**
+	 * Fill html template with user input
+	 * @return string  html ready to send, but backend must fill unsubscribe link (different for every reciepient)
+	 *
+	 */
+	protected function fillHTMLTemplate() {
+		//return true;
+		$file = dirname( __FILE__ ) . "/templates/" . $this->wire('input')->post('newsletter_template');
+
+		if (!file_exists($file)) return "Unable to find template file.";
+
+		$html = \file_get_contents($file, false);
+		//perform substitution
+		return $this->substitute($html);
+	}
+
+
+	/**
+	 * Substitute template variable with user input and convert plain body to html
+	 * @return string  html ready to send, but backend must fill unsubscribe link (different for every reciepient)
+	 *
+	 */
+	protected function substitute($html) {
+		require_once(dirname( __FILE__ ) .'/textformatters.php');
+		$msg = convertBreaks($this->body);
+		$html = str_replace("{{HEADER}}", $this->config('header'), $html);
+		$html = str_replace("{{TITLE}}", $this->title, $html);
+		$html = str_replace("{{CONTENT}}", $msg, $html);
+		$html = str_replace("{{ACTION-LINK}}", $this->actionLink, $html);
+		$html = str_replace("{{ACTION-TEXT}}", $this->actionText, $html);
+		$html = str_replace("{{FOOTER}}", $this->config('footer'), $html);
+		$html = str_replace("{{UNSUBSCRIBE}}", $this->config('unsubscribeText'), $html);
+
+		return $html;
+	}
+
+	/**
+	 * Fill template with user input and convert to plain text
+	 * @return string  plain text ready to send, but backend must fill unsubscribe link (different for every reciepient)
+	 *
+	 */
+	protected function fillTemplateToPlain() {
+		$actionText = $this->actionText . " " . $this->actionLink;
+		$plain = $this->config('header') . "\n\n" .$this->title . "\n\n" . $this->body ."\n\n" . $actionText . "\n\n\n" 
+					. $this->config('footer') . "\n" . $this->config('unsubscribeText') . " {{LINK}}";
+
+		return $this->sanitizer->textarea($plain);
+	}
+
+	/**
+	 * Save ready to send newsletter
+	 * @return bool $onlySaved page will be only saved, not sent
+	 *
+	 */
+	protected function saveNewsletterPage($status) {
+		if ($this->wire('input')->post('newsletter_group') === 'all' ) {
+			$roles = implode("|", $this->config('receiverRole'));
+		} else {
+			$roles = $this->wire('input')->post('newsletter_group');
+		}
+		//save total sent messages number 
+		$count = ($status !== self::$status['SENT'] ? "-" : $this->wire('users')->count("roles=" . $roles . ", email!=''"));
+
+		//details are just string with sent to group(s) ## amount of sent msgs ## template name
+		$details = $this->input->post('newsletter_group') . "##"
+					. $count . "##"
+					. str_replace(".html", "", $this->input->post('newsletter_template')) . "##"
+					. $status;
+
+		if ($this->pageName == "") { 
+			$p = new Page(); 
+			$p->template = $this->templateName;
+			$p->parent = $this->wire('page');
+			$p->name = $this->sanitizer->pageName($this->title . '_'.time()); 
+			$p->title = $this->title;
+			$p->save(); 
+			$this->pageName = $p->name;
+		} else {
+			$p = $this->pages->get("name=".$this->pageName);
+			$p->title = $this->title;
+		}
+
+		$p->of(false);
+		$p->set($this->fieldBody,  $this->body);
+		$p->set($this->fieldDetails, $details);
+		$p->set($this->fieldActionButton, $this->actionText . "##" . $this->actionLink);
+		$p->save();
+	}
+
+
+	/**
+	 * Get template preview image, it assumes the image has the same name and .jpg format
+	 * 
+	 * @param  string $templateFileName name of the template file
+	 * @return string  url to image or empty string if not found
+	 *
+	 */
+	protected function getTemplateImage($templateFileName) {
+		$file = dirname( __FILE__ ) . "/templates/" . str_replace(".html", ".jpg", $templateFileName);
+		$url = $this->config->urls->siteModules . "ProcessSendNewsletter"  . "/templates/" . str_replace(".html", ".jpg", $templateFileName);
+		if (!file_exists($file)) return "";
+		return $url;
+	}
+
+
+	/**
+	 * Render email template preview and return string with markup
+	 * 
+	 * @param  string $templateFileName name of the template file
+	 * @return string  html markup with template
+	 *
+	 */
+	protected function renderTemplatePreview($templateFileName) {
+		$file = dirname( __FILE__ ) . "/templates/" . $templateFileName;
+
+		if (!file_exists($file)) return "Unable to find template file.";
+
+		return \file_get_contents($file, false);
+	}
+
+	/**
+	 * Render newsletter preview and return string with markup
+	 * 
+	 * @param  string $templateFileName name of the template file
+	 * @return string  html markup with template
+	 *
+	 */
+	protected function renderNewsletterPreview($templateFileName) {
+		$html = $this->renderTemplatePreview($templateFileName);
+		return $this->substitute($html);
+	}
+
+	/**
+	 * Read saved page and translate it to newsletter form fields
+	 * 
+	 * @param  string $pageName name of a saved page
+	 * 
+	 */
+	protected function loadSavedPage($pageName) {
+		$this->pageName = $pageName;
+		$p = $this->wire('pages')->get("name=".$pageName);
+		$this->title = $p->title;
+		$this->body = $p->get($this->fieldBody);
+		$action = explode('##', $p->get($this->fieldActionButton));
+		$this->actionText = $action[0];
+		$this->actionLink = $action[1];
+		//0 - group, 1 - number, 2 - template, 3 - status
+		$details = explode('##', $p->get($this->fieldDetails));
+		$this->template = $details[2];
+		$this->newsletterGroup = $details[0];
+	}
+
+	/**
+	 * Move given page to a trash
+	 * 
+	 * @param  string $pageName name of a saved page
+	 *
+	 */
+	protected function deletePage($pageName) {
+		$p = $this->wire('pages')->get("name=".$pageName);
+		$p->delete();
+	}
+
+
+	/**
+	 * Show details about saved page/newsletter
+	 * 
+	 * @param  string $pageName name of a saved page
+	 *
+	 */
+	protected function showPageDetails($pageName) {
+		$this->loadSavedPage($pageName);
+		$html = $this->renderNewsletterPreview($this->template.".html"); 
+
+		$p = $this->wire('pages')->get("name=".$pageName);
+		$date = \date($this->config->dateFormat, $p->created);
+		$out = "<p class='notes'>This newsletter was created by {$p->createdUser->name} on {$date}</p>";
+
+		return $out. $html;
+	}
+	
+
+	/**
+	 * Install ProcessSendNewsletter
+	 *
+	 */
+	public function ___install() {
+        if(version_compare($this->wire('config')->version, self::minVersion , '<')) {
+                throw new WireException("This module requires ProcessWire " . self::minVersion . " or newer."); 
+        }
+
+        $permission = $this->permissions->get('newsletter-sender');
+		if (!$permission->id) {
+				$p = new Permission();
+				$p->name = 'newsletter-sender';
+				$p->title = $this->_('Can send newsletter');
+				$p->save();			
+
+				$this->message('Created New Permission: newsletter-sender');			
+		}	
+
+        //create fields and template
+        $field = $this->fields->get($this->fieldBody);
+        if (!$field->id) {
+	    	$f = new Field(); // create new field object
+			$f->type = $this->modules->get('FieldtypeTextarea'); // get a field type
+			$f->name = $this->fieldBody;
+			$f->label = "Newsletter body text";
+			$f->description = "The field stores text of a sent newsletter";
+			$f->collapsed = 5;
+			$f->rows = 10;
+			$f->save();
+		}
+
+		$field = $this->fields->get($this->fieldActionButton);
+        if (!$field->id) {
+	    	$f = new Field(); // create new field object
+			$f->type = $this->modules->get('FieldtypeText'); // get a field type
+			$f->name = $this->fieldActionButton;
+			$f->label = "Newsletter action button text and url";
+			$f->description = "The field stores info about a sent newsletter";
+			$f->collapsed = 5;
+			$f->save();
+		}
+
+		$field = $this->fields->get($this->fieldDetails);
+        if (!$field->id) {
+	    	$f = new Field(); // create new field object
+			$f->type = $this->modules->get('FieldtypeTextarea'); // get a field type
+			$f->name = $this->fieldDetails;
+			$f->label = "Newsletter details";
+			$f->description = "The field stores info about a sent newsletter";
+			$f->collapsed = 5;
+			$f->rows = 10;
+			$f->save();
+		}
+
+		$fg = new Fieldgroup();
+		$fg->name = $this->templateName;
+		$fg->add($this->fieldBody);
+		$fg->add($this->fieldDetails);
+		$fg->add($this->fieldActionButton);
+		$fg->add("title");
+		$fg->save();
+		// create a new template to use with this fieldgroup
+		$temp = $this->fields->get($this->templateName);
+		if (!$temp->id) {
+			$t = new Template();
+			$t->name = $this->templateName;
+			$t->fieldgroup = $fg;
+			$t->label = 'SendNewsletter';
+			$t->noChildren = 1;// the pages using this template should not have children
+			$t->save();
+		}
+		$this->message('Created Template: SendNewsletter');
+
+		parent::___install();
+	}
+
+	/**
+	 * Uninstall ProcessExportProfile
+	 *
+	 */
+	public function ___uninstall() {
+		//delete all newsletter pages, also those in a trash
+		$moduleID = $this->modules->getModuleID($this); 
+		$page = $this->pages->get("template=admin, process=$moduleID");
+		$this->wire('pages')->delete($page, true);
+		foreach ($this->wire('pages')->find('template='.$this->templateName .', status>=' . Page::statusTrash) as $p) $p->delete();
+
+		// find and delete the menu builder permission and let the user know
+		$permission = $this->permissions->get('newsletter-sender');
+		if ($permission->id){
+			$permission->delete();
+			$this->message('Deleted Permission: newsletter-sender');
+		
+		}
+
+		// find and delete the template
+		$t = $this->wire('templates')->get($this->templateName);
+		if ($t->id) {
+			$this->wire('templates')->delete($t);
+			$this->wire('fieldgroups')->delete($t->fieldgroup);// delete the associated fieldgroups
+			$this->message('Deleted Template: ' . $this->templateName);
+		}
+
+		// find and delete the created fields
+		$fields = array($this->fieldBody, $this->fieldActionButton, $this->fieldDetails);
+		foreach ($fields as $field) {
+					$f = $this->wire('fields')->get($field);
+					if($f->id) $this->wire('fields')->delete($f);	
+					$this->message('Deleted created fields');
+		}
+
+		parent::___uninstall();
+	}
+
+
+	static public function getModuleConfigInputfields(array $data) {
+		$data = array_merge(self::$defaults, $data);
+
+		$fields = new InputfieldWrapper();
+		$modules = wire('modules');
+
+		$field = $modules->get('InputfieldTextarea');
+		$field->attr('name', 'header');
+		$field->attr('rows', 5); 
+		$field->attr('value', $data['header']);
+		$field->label = 'Header you can add to every newsletter.';
+		$field->notes = 'You can use {{NAME}} and {{EMAIL}} to personalise.';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldTextarea');
+		$field->attr('name', 'footer');
+		$field->attr('rows', 5); 
+		$field->attr('value', $data['footer']);
+		$field->label = 'Footer added to every newsletter.';
+		$field->notes = 'You can use {{NAME}} and {{EMAIL}} to personalise.';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'unsubscribeText');
+		$field->attr('size', 0);
+		$field->attr('value', $data['unsubscribeText']);
+		$field->label = 'Description of an unsubscribe link';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldSelect');
+		$field->attr('name', 'unsubscribeUrl');
+		$field->attr('size', 0);
+		$field->attr('value', $data['unsubscribeUrl']);
+		$field->label = 'Field from user template that stores unsubscribe link';
+		$roles = wire('roles')->find('sort=name');
+		//get user template's fields
+		$items = wire('templates')->get('user')->fields;
+		foreach ($items as $f) {
+			$field->addOption($f->name);
+		}
+		$field->columnWidth = 50;
+		$field->required = true; 
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldSelectMultiple');
+		$field->attr('name', 'receiverRole');
+		$field->attr('size', 0);
+		$field->attr('value', $data['receiverRole']);
+		$field->label = 'User role to receive newsletter';
+		$roles = wire('roles')->find('sort=name');
+		foreach ($roles as $r) {
+			$field->addOption($r->name);
+		}
+		$field->columnWidth = 50;
+		$field->required = true; 
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldSelect');
+		$field->attr('name', 'senderRole');
+		$field->attr('size', 0);
+		$field->attr('value', $data['senderRole']);
+		$field->label = 'User role able to send newsletter';
+		$field->notes = "Or anyone having 'newsletter-sender' permission";
+		$roles = wire('roles')->find('sort=name');
+		foreach ($roles as $r) {
+			$field->addOption($r->name);
+		}
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldCheckbox');
+		$field->attr('name', 'useNames');
+		$field->attr('size', 0);
+		$field->attr('checked', $data['useNames']); 
+		$field->label = 'Allow for subscribers names in newsletters';
+		$field->notes = "Check this if you have collected subscribers names then you can use {{NAME}} variable in templates";
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldSelect');
+		$field->attr('name', 'backend');
+		$field->attr('size', 0);
+		$field->attr('value', $data['backend']);
+		$field->label = 'Select method of sending emails';
+		//find available backends
+		$files = scandir(dirname ( __FILE__ ) );
+		foreach ($files as $file) {
+			//file has to have name longer then 0 characters, so == is enough
+			if (strpos($file, ".backend") == true) {
+				$field->addOption($file, str_replace(".backend", "", $file));
+			}
+		}
+		$field->columnWidth = 50;
+		$field->required = true; 
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'fromName');
+		$field->attr('size', 50);
+		$field->attr('value', $data['fromName']);
+		$field->label = 'Email "from:" field - name';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'fromEmail');
+		$field->attr('size', 50);
+		$field->attr('value', $data['fromEmail']);
+		$field->label = 'Email "from:" field - email';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'backendPass');
+		$field->attr('size', 100);
+		$field->attr('value', $data['backendPass']);
+		$field->label = 'Password for smtp or api key';
+		$field->notes = 'This field value depends on chosen backend.';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		return $fields;
+	}
+
+	/**
+	* get the config either default or overwritten by user config
+	* @param  string $key name of the option
+	* @return mixed  return requested option value
+	*/
+	public function config($key) {
+		return ($this->get($key)) ? $this->get($key) : self::$defaults[$key];
+	}
+
+}

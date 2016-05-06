@@ -1,0 +1,76 @@
+.newsletter-title {
+	display: inline-block;
+	font-size: 120%;
+	margin-right: 10px;
+	margin-bottom: 20px;
+}
+
+.newsletter-roles {
+	display: inline-block;
+	margin-left: 10px;
+	margin-bottom: 10px;
+	text-transform: capitalize;
+}
+
+#Inputfield_template_preview .InputfieldContent{
+	max-height: 150px;
+	overflow: scroll; 
+}
+
+#Inputfield_template_preview label{
+	height: 1px;
+	padding: 0;
+	overflow: hidden; 
+}
+
+#Inputfield_template_preview img{
+	max-width: 100%;
+	
+}
+
+#TemplatePrevieFrame{
+	overflow: hidden;
+	width: 700px;
+	height: 200px;
+    -ms-transform: scale(0.5);
+    -moz-transform: scale(0.5);
+    -o-transform: scale(0.5);
+    -webkit-transform: scale(0.5);
+    transform: scale(0.5);
+
+    -ms-transform-origin: 0 0;
+    -moz-transform-origin: 0 0;
+    -o-transform-origin: 0 0;
+    -webkit-transform-origin: 0 0;
+    transform-origin: 0 0;
+}
+
+#NewsletterNotes .notes{
+	margin: 0;
+	padding: .5em;
+
+}
+
+#NewsletterNotes .InputfieldHeader {
+	padding: 0;
+}
+
+td .fa {
+	margin-right: 1px;
+}
+
+#AdminDataTable1 caption {
+	font-size: 0.9em;
+}
+
+#AdminDataTable1 caption .description{
+	margin-top: 0;
+}
+
+.Inputfields .InputfieldMarkup .InputfieldContent {
+	margin-top: 0;
+}
+
+.InputfieldForm .Inputfields .InputfieldButton {
+	margin-left: .5em;
+}
