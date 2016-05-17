@@ -18,11 +18,11 @@ newsletter using provided template (or easily creating your own).
 Every user must have a field in their template with 'unsubscribe link' that will be added
 to the message. 
 
-You can find smtp backend which is an example how to write your own backend with other provider.
+You can find smtp backend which is an example how to write your own backend with other providers.
 
 ## Requirements
 
-This version of the profile exporter requires ProcessWire 3.0. 
+This version of the module requires ProcessWire 3.0. 
 
 ---
 

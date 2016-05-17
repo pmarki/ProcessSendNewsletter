@@ -1,6 +1,6 @@
 <?php namespace ProcessWire;
 
-/**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
+/**
  * Receive request to send newsletter
  * @param  string $title newsletter subject
  * @param  string $html newsletter html body
