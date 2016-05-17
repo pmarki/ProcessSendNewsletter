@@ -3,7 +3,7 @@ $(document).ready(function(){
 	//change template preview
 	$("#Inputfield_newsletter_template").change(function() {
 		request= $.ajax({
-	        url: './',
+	        url: './TemplatePreview/',
 		    type: "post",
 		    data: "templateName=" + $(this).val()
 		});

@@ -110,6 +110,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		//info about opened page
 		$form = $this->modules->get('InputfieldForm'); 
 		$form->attr('id', 'NewsletterModule');
+		$form->attr('action', $this->wire('page')->url );
 		if ($this->pageName) {
 			$title = $this->pages->get("name=".$this->pageName)->title;
 			$prepended = "<div id='NewsletterNotes' class='Inputfields'><div class='InputfieldHeader'>" .
@@ -233,7 +234,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f->attr('id', 'button_preview'); 
 		$f->attr('value', $this->_('Preview')); 
 		$f->icon = 'binoculars';
-		$f->href = $this->wire('page')->url . '?preview=1&modal=1'; 
+		$f->href = $this->wire('page')->url . 'Preview/?preview=1&modal=1'; 
 		$tab->add($f);
 
 		$form->add($tab);
@@ -261,7 +262,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			//sent to, total sent, used template, status
 			//it changes the icon and available actions
 			$arr = explode("##", $p->get($this->fieldDetails));
-			$url = $this->wire('page')->url . "?pageName=" . $p->name;
+			$url = $this->wire('page')->url . "loadPage/?pageName=" . $p->name;
 			if (!isset($arr[3])) continue;
 
 			switch ($arr[3]) {
@@ -283,12 +284,12 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			}
 
 			//append preview button
-			$url = $this->wire('page')->url . "?detailsPageName=" . $p->name . "&modal=1";
+			$url = $this->wire('page')->url . "showDetails/?detailsPageName=" . $p->name . "&modal=1";
 			$edit .= '&nbsp;<a class="NewsletterDetails" href="'.$url.'" title="Show details"><i class="fa fa-binoculars"></i></a>';
 
 			//append delete button but do not allow to trash current page and sent newsletters
 			if ($p->name !== $this->pageName && $arr[3] !== self::$status['SENT']) {
-				$url = $this->wire('page')->url . "?trashPageName=" . $p->name;
+				$url = $this->wire('page')->url . "trashPage/?trashPageName=" . $p->name;
 				$edit .= '&nbsp;<a class="NewsletterTrashPage"  href="'.$url.'" title="Delete"><i class="fa fa-trash-o"></i></a>';
 			}
 
@@ -336,45 +337,79 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	public function ___execute() {
 
 		if (!$this->setup()) return; 
-
 		if ($this->input->post('submit_send')) {
 			$this->fillFields();
 			$out = $this->processSend(false);
 			return $out; 
-		} else 	if ($this->input->post('submit_test')) {
+		} else if ($this->input->post('submit_test')) {
 			$this->fillFields();
 			$out = $this->processSend(true);
 			return $out; 
-		//on select template change
-		} else if ($this->input->post('templateName')) {
-			return $this->getTemplateImage($this->input->post('templateName'));
-		//preview newsletter in popup
-		} else if ($this->input->get('preview')) {
-			$this->fillFields();
-			return $this->renderNewsletterPreview($this->input->get('template'),
-												$this->input->get('title'));
-		//save text as a page
 		} else if ($this->input->post('submit_save')) {
 			$this->fillFields();
 			$this->saveNewsletterPage(self::$status['SAVED']);
 			$this->session->redirect($this->page->url . "?pageName=".$this->pageName);
-		//load saved newsletter
-		} else if ($this->input->get('pageName')) {
+		} else {
+				return $this->renderNewsletter();
+		}
+
+	}
+
+	/**
+	 * Preview newsletter to be sent
+	 *
+	 */
+	public function executePreview() {
+		if ($this->input->get('preview')) {
+			$this->fillFields();
+			return $this->renderNewsletterPreview($this->input->get('template'),
+												  $this->input->get('title'));
+		}
+	}
+
+	/**
+	 * Fired on select template change
+	 *
+	 */
+	public function executeTemplatePreview() {
+		if ($this->input->post('templateName')) {
+			return $this->getTemplateImage($this->input->post('templateName'));
+		} 
+	}
+
+	/**
+	 * Move page to trash
+	 *
+	 */
+	public function executeTrashPage() {
+		if ($this->input->get('trashPageName')) {
+			$this->deletePage($this->input->get('trashPageName'));
+			return 'true';
+		} 
+	}
+
+	/**
+	 * Move page to trash
+	 *
+	 */
+	public function executeLoadPage() {
+		if ($this->input->get('pageName')) {
 			$this->loadSavedPage($this->input->get('pageName'));
 			//prevent form resaving at the same name
 			if ($this->input->get('createNew')) {
 				$this->pageName = 0;
 			}
 			return $this->renderNewsletter();
+		}
+	}
 
-		} else if ($this->input->get('trashPageName')) {
-			$this->deletePage($this->input->get('trashPageName'));
-			return 'true';
-		} else if ($this->input->get('detailsPageName')) {
+	/**
+	 * Move page to trash
+	 *
+	 */
+	public function executeShowDetails() {
+		if ($this->input->get('detailsPageName')) {
 			return $this->showPageDetails($this->input->get('detailsPageName'));
-
-		} else {
-			return $this->renderNewsletter();
 		}
 	}
 
@@ -415,7 +450,6 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$recipients = $this->users->find("email=". $this->user->email);
 		} else {
 			$recipients = $this->wire('users')->find("roles=" . $roles . ", email!=''");
-			if (!$recipients) return "<h2>Subscribers list is empty</h2>";
 		}
 
 		$subscribers = array();
@@ -427,7 +461,12 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			);
 			$subscribers[] = $r;
 		}
-		//save newsletter
+
+		if (!count($subscribers)) {
+			$this->error("Subscribers list is empty, nothing to do.");
+			$this->fillFields();
+			return $this->renderNewsletter();
+		}
 		
 
 		//prepare text to be sent
@@ -448,19 +487,20 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		//in test case go back to the same page
 		if ($test) {
-			if ($result) {
+			if ($result === true) {
 				$this->message("Test message was sent to you at " . $this->user->email);
 			} else {
-				$this->message("Error sending newsletter: " .$result);
+				$this->error("Error sending newsletter: " .$result);
 			}
 			$this->fillFields();
 			return $this->renderNewsletter();
 		}
+
 		if ($result !== true) {
-			if (!$test)	$this->saveNewsletterPage(self::$status['ERROR']);
+			$this->saveNewsletterPage(self::$status['ERROR']);
 			return $this->_("<h2>Error sending newsletter </h2>") .$result;
 		}
-		if (!$test)	$this->saveNewsletterPage(self::$status['SENT']);
+		$this->saveNewsletterPage(self::$status['SENT']);
 		return $this->_("<h2>Sent successfully to subscribers</h2>");
 	}
 
