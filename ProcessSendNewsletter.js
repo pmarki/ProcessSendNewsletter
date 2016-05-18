@@ -66,15 +66,29 @@ $(document).ready(function(){
             },
             type: 'iframe',
             disableOn: 0,
-            callbacks: {
-    			open: function() {
-    				//var str = $('.mfp-iframe').html();
-    				//console.log(str);
-     				//$('.mfp-iframe').html( str.replace('{{HEADER}}', $('Inputfield_newsletter_title').val()) );
-     			}
-    		},
     	}); 
     	return false;
+    });
+
+   // $.trumbowyg.svgPath = ProcessWire.config.iconPath; 
+    $('#Inputfield_newsletter_body').trumbowyg({
+        resetCss: true,
+        btns: [
+            ['formatting'],
+            ['strong'],
+            ['em'],
+            ['underline'],
+            ['superscript', 'subscript'],
+            ['link'],
+            ['justifyLeft'],
+            ['justifyCenter'],
+            ['justifyRight'],
+            'btnGrp-lists',
+            ['horizontalRule'],
+            ['removeformat'],
+            ['viewHTML'],
+            ['fullscreen']
+        ]
     });
 
 });

@@ -1,3 +1,9 @@
+@import "wysiwyg/ui/trumbowyg.css";
+
+strong {
+	font-weight: bold;
+}
+
 .newsletter-title {
 	display: inline-block;
 	font-size: 120%;
