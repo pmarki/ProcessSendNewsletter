@@ -1,4 +1,4 @@
-<?php namespace ProcessWire;
+<?php
 
 /**
  * Send newsletter emails using built-in mail

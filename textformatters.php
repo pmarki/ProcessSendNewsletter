@@ -1,6 +1,4 @@
-<?php namespace ProcessWire;
-
-
+<?php
 //Convert new line to paragraph and html line breaks
 //Taken from: https://github.com/gerritvanaaken/TextformatterAutoParagraph
 function convertBreaks($str) {

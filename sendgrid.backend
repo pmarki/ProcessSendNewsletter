@@ -1,4 +1,4 @@
-<?php namespace ProcessWire;
+<?php
 
 /**
  * Receive request to send newsletter

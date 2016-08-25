@@ -1,7 +1,7 @@
-<?php namespace ProcessWire;
+<?php
 
 /**
- * Send newsletter to sunbscribed users using sendgrid
+ * Send newsletter to subscribed users using various beckends
  * by Piotr Markiewicz
  *
  * ProcessWire 2.x 
@@ -14,7 +14,7 @@
 
 class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
-	const minVersion = '3.0.8';
+	const minVersion = '2.8.8';
 
 	public static function getModuleInfo() {
 		return array(
@@ -26,7 +26,9 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 				'name' => 'send-newsletter',
 				'parent' => 'setup',
 				),
-			'requires' => 'ProcessWire>=3.0.8'
+			'requires' => 'ProcessWire>=2.8.8',
+			'installs' => 'Subscribers',
+			'autoload' => false
 			);
 	}
 
@@ -35,16 +37,14 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			'header' => 'Hi {{NAME}}, this is a new issue of our newsletter.',
 			'footer' => 'You have received this newsletter because you subscribed on our website.',
 			'unsubscribeText' => 'Click here to unsubscribe.',
-			'unsubscribeUrl' => '',
-			'senderRole' => "superuser",
-			'receiverRole' => "",
-			'backend' => "",
-			'useNames' => "",
-			'fromEmail' => "newsletter@yourdomain.com",
-			'fromName' => "My website newsletter",
-			'backendPass' => "",
-
-
+			'unsubscribeUrl' => 'subscribers_url',
+			'senderRole' => 'superuser',
+			'receiverRole' => 'newsletter',
+			'backend' => ',
+			'useNames' => ',
+			'fromEmail' => 'newsletter@yourdomain.com',
+			'fromName' => 'My website newsletter',
+			'backendPass' => '',
 		);
 
 	//names of fields used during install
@@ -321,7 +321,32 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$tab->add($f);
 
 		$form->add($tab);
-		
+
+		if  ($this->modules->isInstalled('Subscribers')) {
+			//third tab - subscribers
+			$tab = new InputfieldWrapper();
+			$tab->attr('title', $this->_('Subscribers')); 
+			$id = $this->className() . 'Subscribers';
+			$tab->attr('id', $id); 
+			$tab->class .= ' WireTab';
+			
+			$f = $this->modules->get('InputfieldTextarea'); 
+			$f->attr('name', 'subscribersCsv'); 
+			$f->attr('value', $this->body);
+			$f->label = $this->_('Import subscribers'); 
+			$f->description = "Paste emails to import, each in a new line";
+			$f->attr('rows', 5); 
+			$f->collapsed = 5; 
+			$tab->add($f);
+
+			$f = $this->modules->get('InputfieldSubmit'); 
+			$f->attr('name', 'submit_import'); 
+			$f->attr('value', $this->_('Import')); 
+			$f->icon = 'paper-plane';
+			$tab->add($f);
+		}
+
+		$form->add($tab);
 		return $form;
 	}
 
@@ -353,8 +378,10 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$this->fillFields();
 			$this->saveNewsletterPage(self::$status['SAVED']);
 			$this->session->redirect($this->page->url . "LoadPage/?pageName=".$this->pageName);
+		} else if ($this->input->post('submit_import')) {
+			return $this->executeImport();
 		} else {
-				return $this->renderNewsletter();
+			return $this->renderNewsletter();
 		}
 
 	}
@@ -393,7 +420,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	}
 
 	/**
-	 * Move page to trash
+	 * load saved newsletter
 	 *
 	 */
 	public function executeLoadPage() {
@@ -408,13 +435,21 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	}
 
 	/**
-	 * Move page to trash
+	 * Show sent newsletter details 
 	 *
 	 */
 	public function executeShowDetails() {
 		if ($this->input->get('detailsPageName')) {
 			return $this->showPageDetails($this->input->get('detailsPageName'));
 		}
+	}
+
+	public function executeImport() {
+		if ($this->input->post('subscribersCsv')) {
+			$subscribers = wire('modules')->get('Subscribers');
+			return $subscribers->importSubscribers($this->input->post('subscribersCsv'));
+
+		} 
 	}
 
 	/**
@@ -520,7 +555,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		if (!file_exists($file)) return "Unable to find template file.";
 
-		$html = \file_get_contents($file, false);
+		$html = file_get_contents($file, false);
 		//perform substitution
 		return $this->substitute($html);
 	}
@@ -627,7 +662,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		if (!file_exists($file)) return "Unable to find template file.";
 
-		return \file_get_contents($file, false);
+		return file_get_contents($file, false);
 	}
 
 	/**
@@ -685,7 +720,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$html = $this->renderNewsletterPreview($this->template.".html"); 
 
 		$p = $this->wire('pages')->get("name=".$pageName);
-		$date = \date($this->config->dateFormat, $p->created);
+		$date = date($this->config->dateFormat, $p->created);
 		$out = "<p class='notes'>This newsletter was created by {$p->createdUser->name} on {$date}</p>";
 
 		return $out. $html;
@@ -708,14 +743,24 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 				$p->title = $this->_('Can send newsletter');
 				$p->save();			
 
-				$this->message('Created New Permission: newsletter-sender');			
+				$this->message('Created new permission: newsletter-sender');			
+		}	
+
+		$role = $this->roles->get('newsletter');
+		if (!$role->id) {
+				$p = new Role();
+				$p->name = 'newsletter';
+				$p->title = $this->_('Will receive newsletters');
+				$p->save();			
+
+				$this->message('Created new role: newsletter');			
 		}	
 
         //create fields and template
         $field = $this->fields->get($this->fieldBody);
         if (!$field->id) {
-	    	$f = new Field(); // create new field object
-			$f->type = $this->modules->get('FieldtypeTextarea'); // get a field type
+	    	$f = new Field();
+			$f->type = $this->modules->get('FieldtypeTextarea');
 			$f->name = $this->fieldBody;
 			$f->label = "Newsletter body text";
 			$f->description = "The field stores text of a sent newsletter";
@@ -726,8 +771,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		$field = $this->fields->get($this->fieldActionButton);
         if (!$field->id) {
-	    	$f = new Field(); // create new field object
-			$f->type = $this->modules->get('FieldtypeText'); // get a field type
+	    	$f = new Field(); 
+			$f->type = $this->modules->get('FieldtypeText'); 
 			$f->name = $this->fieldActionButton;
 			$f->label = "Newsletter action button text and url";
 			$f->description = "The field stores info about a sent newsletter";
@@ -737,8 +782,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		$field = $this->fields->get($this->fieldDetails);
         if (!$field->id) {
-	    	$f = new Field(); // create new field object
-			$f->type = $this->modules->get('FieldtypeTextarea'); // get a field type
+	    	$f = new Field(); 
+			$f->type = $this->modules->get('FieldtypeTextarea'); 
 			$f->name = $this->fieldDetails;
 			$f->label = "Newsletter details";
 			$f->description = "The field stores info about a sent newsletter";
@@ -770,7 +815,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	}
 
 	/**
-	 * Uninstall ProcessExportProfile
+	 * Uninstall module
 	 *
 	 */
 	public function ___uninstall() {
@@ -780,7 +825,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$this->wire('pages')->delete($page, true);
 		foreach ($this->wire('pages')->find('template='.$this->templateName .', status>=' . Page::statusTrash) as $p) $p->delete();
 
-		// find and delete the menu builder permission and let the user know
+		// find and delete the permission
 		$permission = $this->permissions->get('newsletter-sender');
 		if ($permission->id){
 			$permission->delete();
@@ -886,7 +931,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$field->attr('size', 0);
 		$field->attr('checked', $data['useNames']); 
 		$field->label = 'Allow for subscribers names in newsletters';
-		$field->notes = "Check this if you have collected subscribers names then you can use {{NAME}} variable in templates";
+		$field->notes = "Check this if you have collected subscribers names so you can use {{NAME}} variable in templates";
 		$field->columnWidth = 50;
 		$fields->append($field);
 

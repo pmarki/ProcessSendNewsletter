@@ -1,0 +1,650 @@
+<?php
+
+/**
+ * Collect subscribers
+ * by Piotr Markiewicz (pmarki)
+ *
+ * ProcessWire 2.x 
+ * Copyright (C) 2014 by Ryan Cramer 
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ * 
+ * http://processwire.com
+ *
+ * 
+ *
+ */
+
+class Subscribers extends WireData implements Module, ConfigurableModule {
+
+	const minVersion = '2.8.8';
+
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Newsletter Subscribers', 
+			'summary' => 'Collect newsletter subscribers.', 
+			'version' => 010, 
+			'icon' => 'paper-plane', 
+			'requires' => 'ProcessWire>=2.8.8',
+			'autoload' => true
+			);
+	} 
+
+	//initial settings 
+	protected static $defaults = array(
+			'from' => "noreply@yoursite.com",
+			'subject' => "Newsletter subscription confirmation",
+			'bodyHtml' => "<p>Click <a href='{{LINK}}'> here</a> to complete subscription</p>",
+			'body' => "Copy and paste this link \n{{LINK}}\n to your browser to complete subscription",
+			'salt' => 0,
+			'answerUrl' => '1',
+			'subscribeMsg' => 'Thank you. You will receive confirmation email soon.',
+			'confirmMsg' => 'Thank you. Your email was added to our newsletter list.',
+			'unsubscribeMsg' => 'Your account has been successfully deleted.',
+			'errorMsg' => 'Please contact site administrator at',
+			'existsMsg' => 'It looks that you are already subscribed',
+	);
+	protected $fieldUrl = 'subscribers_url';
+	protected $fieldAuth = 'subscribers_auth';
+
+	/**
+	 * Initialize the module, this function will respond to get variables: newsletterEmail, confirm, unsub
+	 * you can receive a result by ajax with simply array where a key is "result" and a value is true on success
+	 * or error string.
+	 * You can also provide feedback to users by rediraction to proper pages or to single page echoing session "massage"
+	 * 
+	 * 
+	 */
+	public function init() {
+		//subscribe
+		if ($this->wire('input')->newsletterEmail) {
+			$result = $this->subscribe($this->wire('input')->newsletterEmail);
+			if ($this->wire('config')->ajax) {
+	    		echo json_encode( array('result' => $result));
+	    		exit;
+			} else {
+				$error = __("Error: ").$result . '<br>'. $this->config('errorMsg');
+				wire('session')->set("subsc_message", 
+							($result===true) ? $this->config('subscribeMsg') : $error);
+				wire('session')->redirect( $this->pages->get('id='.$this->config('answerUrl'))->url);
+			}
+		}
+
+		//confirm
+		if ($this->wire('input')->get->confirm) {
+			$result = $this->confirm();
+			if ($this->wire('config')->ajax) {
+	    		echo json_encode( array('result' => $result));
+	    		exit;
+			} else {
+				$error =  $this->config('errorMsg');
+				wire('session')->set("subsc_message", 
+							($result===true) ? $this->config('errorMsg') : $error);
+				wire('session')->redirect($this->pages->get('id='.$this->config('answerUrl'))->url);
+			}
+		}
+
+		//unsubscribe
+		if ($this->wire('input')->get->unsub) {
+			$result = $this->unsubscribe();
+			if ($this->wire('config')->ajax) {
+	    		echo json_encode( array('result' => $result));
+	    		exit;
+			} else {
+				$error = __("Error: ").$result . ' '. $this->config('errorMsg');
+				wire('session')->set("subsc_message", 
+							($result===true) ? $this->config('errorMsg') : $this->wire('sanitizer')->text($error) );
+				wire('session')->redirect( $this->pages->get('id='.$this->config('answerUrl'))->url);
+			}
+		}
+  	}
+
+	/**
+	 * Import subscribers from csv data
+	 * 
+	 * @param  string $scv data in csv format, first row must be a field name
+	 * @return mixed true on success or error string
+	 *
+	 */
+	public function importSubscribers ($csv) {
+		$arr = explode(PHP_EOL, $csv);
+		
+		//if first item is an email, append header, otherwise remove first row to header
+		if (wire('sanitizer')->email($arr[0]) ) {
+			$header = array('email');
+		} else {
+	    	$header = array_shift($arr); 
+	    	$header = explode(';', $header);
+	    }
+	    $arr_out = array();
+	    foreach ($arr as $row) {
+	        $result = array();
+	        //set header as key
+	        $item = explode(';', $row);
+	        foreach ($header as $key => $value) {
+					if (isset( $item[$key]) ) {
+			    		$result[trim($value)] = trim($item[$key]);
+			    	} else {
+			    		$result[$value] = "";
+			    	}
+
+			    }
+			    $arr_out[] = $result;
+	    }
+	    //create users, $item key is a field name
+	    $counter = 0;
+	    $err = "";
+	    foreach ($arr_out as $item) {
+	    	if (!isset($item['email'])) continue;
+	    	if (! wire('sanitizer')->email($item['email'])) {
+	    		$err .= $item['email'] . "; ";
+	    		continue;
+	    	}
+	    	//TODO what about other passed fields values?
+	    	$this->confirmUser($this->createUser($item['email']));
+	    	$counter++;
+	    }
+	    $out = "Successfully added $counter subscribers";
+	    if ($err) $out .= "<br>Error in adding: " . $err;
+		return $out;
+
+	}
+
+	/**
+	 * Render subscription form 
+	 * 
+	 * @param  string $msg info message to the user
+	 * @param  string $placeholder placeholder for email input
+	 * @param  string $btnText text for submit button
+	 * @return string form markup
+	 *
+	 */
+	public function renderForm($msg, $placeholder, $btnText) {
+		$out = '<form id="form-newsletter" method="get" action="'. wire('pages')->get("/")->url. '">';
+		$out .= "<p>$msg</p>";
+		$out .= '<input type="email" name="newsletterEmail" id="newsletter-input" class="" placeholder="' . $placeholder.'" required/>';
+		$out .= '<button id="newsletter-button" class="btn">' . $btnText .'</button></form>';
+		return $out;
+	}
+
+	/**
+	 * Render module answer for users
+	 * 
+	 * @return string html markup
+	 *
+	 */
+	public function renderAnswer() {
+		$out = "";
+		if ($msg = wire('session')->subsc_message) {
+			$out .= "<div id='subscribersAnswer'>{$msg}</div>";
+			wire('session')->remove("subsc_message");
+		}
+		return $out;
+	}
+
+	/**
+	 * Subscribe user with given email
+	 * 
+	 * @param  string $email user email
+	 * @return mixed true on success or error string
+	 *
+	 */
+	public function subscribe($email) {
+		$email = $this->wire('sanitizer')->email($email);
+		if (!$email) {
+	    	return __('Invalid email');
+		}
+		if ($this->userExist($email)) {
+	    	return $this->config('existsMsg'); 
+		}
+
+	  	//generate random string for url authentication
+		$random = '';
+		$chars = 'abcdefghijkmnopqrstuvwxyz0123456789ABCDEFGHIJKMNOPQRSTWVUXYZ';
+		$length = mt_rand(15,19); // auth code between 15 and 19 characters
+		for($n = 0; $n < $length; $n++) $random .= $chars[mt_rand(0, strlen($chars)-1)];
+	  	$time = time();
+
+	  	$u = $this->createUser($email);
+	  	$u->of(false);
+	  	$url = "http://" .wire('config')->httpHost . wire('pages')->get("/")->url . $this->encodeInput("confirm", $u->id, $time, $random);
+	  	$u->{$this->fieldAuth} = "$time $random"; 
+	  	$u->{$this->fieldUrl} = $url;
+	  	$u->save();
+
+		if ($this->sendEmail($email, $url) ) {
+	    	return true;
+		} else {
+			//it means mail() was unable to send message
+	    	return __('Error while sending confirmation email');
+		}
+	}
+
+	/**
+	 * Invoked when user clicked confirmation link, change user role from guest to newsletter
+	 * 
+	 * @return mixed true on success or error string
+	 *
+	 */
+	public function confirm() {
+	    $id = $this->wire('sanitizer')->text($this->wire('input')->confirm);
+	    $code = $this->wire('sanitizer')->text($this->wire('input')->token);
+	    $random = $this->wire('sanitizer')->text($this->wire('input')->auth);
+	    if ($code && $id && $random) {
+	    	$userId = $this->decodeUserId($id);
+	      	$time = $this->decodeDate($code);
+	      	//check user credentials
+	      	if ($u = $this->validateUser($userId, $time, $random)) {
+	      		$this->confirmUser($u);
+	      		return true;
+	      	} else {
+	      		//it means user clicked invalid url, maybe salt was changed 
+	      		return __("Wrong user credentials");
+	      	}	
+	  	} else {
+	  		//it means the url was missing part of it
+	  		return __("Wrong data received");
+	  	}
+	}
+
+	/**
+	 * New auth url is populated which stores an unsubsribe url
+	 * 
+	 * @param  user object $u 
+	 *
+	 */
+	protected function confirmUser ($u) {
+		$random = '';
+		$chars = 'abcdefghijkmnopqrstuvwxyz0123456789ABCDEFGHIJKMNOPQRSTWVUXYZ__';
+		$length = mt_rand(27,30); // auth code between 27 and 30 characters
+		for($n = 0; $n < $length; $n++) $random .= $chars[mt_rand(0, strlen($chars)-1)];
+
+	  	$time = time();
+	  	$url = "http://" .wire('config')->httpHost . wire('pages')->get("/")->url . $this->encodeInput("unsub", $u->id, $time, $random);
+
+	  	$u->of(false);
+		$u->{$this->fieldUrl}= $url; 
+	  	$u->{$this->fieldAuth} = "$time $random";
+		$u->addRole("newsletter");
+		$u->save();
+	}
+
+	/**
+	 * Invoked when user clicked unsubscribe link
+	 * 
+	 * @return mixed true on success or error string
+	 *
+	 */
+	public function unsubscribe() {
+	  	$id = $this->wire('sanitizer')->text($this->wire('input')->get->unsub);
+	  	$code = $this->wire('sanitizer')->text($this->wire('input')->get->token);
+	  	$random = $this->wire('sanitizer')->text($this->wire('input')->get->auth);
+	  	if ($code && $id && $random) {
+	    	$userId = $this->decodeUserId($id);
+	    	$time = $this->decodeDate($code);
+	    	if ($u = $this->validateUser($userId, $time, $random)) {
+	      		$this->unsubscribeUser($u);
+	      		return true;
+	    	} else {
+	    		//user clicked invalid link or is already unsubscribed
+				return __("This link was invalid.");
+	    	}
+	  	} else {
+	  		//it means the url was missing part of it
+	  		return __("Error processing data");
+	  	}
+	}
+
+	/**
+	 * Unsubscribe given user, if doesnt belongs to other groups delete it
+	 * @param  user object $u 
+	 * @return mixed true on success or error string
+	 *
+	 */
+	public function unsubscribeUser ($u) {
+		$u->of(false);
+		$u->removeRole(wire('roles')->get("newsletter"));
+		//$u->link = ""; 
+		//$u->auth = "";
+		$u->save();
+		//it user is only guest now, remove from system
+		if ($u->roles->count() <= 1) {
+			wire('users')->delete($u);
+		}
+	}
+
+	/**
+	 * Create new user, if user exists return user
+	 * @param  string $email user email
+	 * @return user object
+	 *
+	 */
+	protected function createUser($email) {
+		$userName = wire('sanitizer')->name($email);
+		//find user or create one
+	  	$u = wire('users')->count("email=$email");
+	  	if ( !$u) {
+	  		// generate a random password
+			$pass = '';
+			$chars = 'abcdefghjkmnopqrstuvwxyz23456789ABCDEFGHKMNPRSTUXYZ!.,;:?#*()@#&[]{}.,:?!,<>:;';
+			$length = mt_rand(12,14); // auth code between 12 and 14 characters
+			for ($n = 0; $n < $length; $n++) $pass .= $chars[mt_rand(0, strlen($chars)-1)];
+		  	$u = new User();
+	    	$u->name = $userName;
+	    	$u->email = $email;
+		  	$u->pass = $pass;
+		  	$u->save();
+	  	} else {
+	    	$u = wire('users')->get("email=$email");
+	  	}
+	  	return $u;
+	}
+
+	/**
+	 * Check if user already exists and is in newsletter group
+	 * @param  string $email user email
+	 * @return mixed user object or boolen false
+	 *
+	 */
+	protected function userExist($email) {
+		$u = wire('users')->count("email=$email");
+		if (!$u) return false;
+		if (!wire('users')->get("email=$email")->hasRole('newsletter') ) return false;
+	  	return $u;
+	}
+
+
+	/**
+	 * Return salt integer
+	 * @return integer
+	 *
+	 */
+	protected function salt() {
+	  	return $this->config('salt');
+	}
+
+	/**
+	 * Prepere part of url for user actions (confirm, unsubscribe)
+	 * @param  string $action get variable name
+	 * @param int $userId
+	 * @param int $time unix time
+	 * @param string $random random generated string
+	 * @return string urlencoded part of a action link
+	 *
+	 */
+	protected function encodeInput($action, $userId, $time, $random) {
+		$date = $time* $this->salt();
+	  	$random = "&auth=" . $random;
+	  	return "?$action=" . urlencode(base64_encode($userId)) . "&token=" . urlencode(base64_encode($date)) . $random;
+	}
+
+	/**
+	 * Convert url encoded user id to its numerical value
+	 * @param string $userId 
+	 * @return int processwire user id
+	 *
+	 */
+	protected function decodeUserId($string) {
+	  	$userId = base64_decode(urldecode($string));
+	  	$id = intval($userId);
+	  	if ($id > 1)
+	    	return $userId; 
+	  	return 0;
+	}
+
+	/**
+	 * Convert url encoded date to its numerical value
+	 * @param string $date
+	 * @return int unix time
+	 *
+	 */
+	protected function decodeDate($string) {
+		echo $string;
+	  	$date = base64_decode(urldecode($string));
+	  	$time = intval($date);
+	  	if ($time > 1)
+	    	return $time / $this->salt(); 
+	  	return 0;
+	}
+
+	/**
+	 * Check if received in url user credentials are valid
+	 * @param int $userId 
+	 * @param int $time unix time
+	 * @param string $random random generated string
+	 * @return mixed: user object or boolen false
+	 *
+	 */
+	protected function validateUser($userId, $time, $random) {
+	  //check validity of input
+	  	$u = wire('users')->get(intval($userId));
+	  	if (!$u) {
+	    	return false;
+	  	}
+
+	  	if ($u->{$this->fieldAuth} !== ("$time $random")) {
+	    	return false;
+	  	}
+	  	return $u;
+	}
+
+	/**
+	 * Send confirmation email
+	 * @param string $email valid email address 
+	 * @param string $url link for confirmation action
+	 * @return bool: true on success, false on error
+	 *
+	 */
+	protected function sendEmail($email, $url) {
+
+		//wire('log')->save('subscription', $msg);
+		//Create a new PHPMailer instance
+		$mail = wireMail();;
+		//Set who the message is to be sent from
+		$mail->from($this->config('from'));
+		//Set who the message is to be sent to
+		$mail->to($email);
+		//Set the subject line
+		$mail->subject = $this->config('subject');
+		//Set message
+		$message = str_replace("{{LINK}}", $url, $this->config('bodyHtml'));
+		$mail->bodyHTML($message);
+		//Replace the plain text body with one created manually
+		$altMessage = str_replace("{{LINK}}", $url, $this->config('body'));
+		$mail->body = $altMessage;
+		return $mail->send();
+	  
+	}
+
+	/**
+	 * Generate random salt, used in installation only
+	 *
+	 */
+	private static function genSalt() {
+		return mt_rand(211,499);
+	}
+
+	/**
+	 * Install ProcessSubscribers
+	 *
+	 */
+	public function ___install() {
+        if(version_compare($this->wire('config')->version, self::minVersion , '<')) {
+                throw new WireException("This module requires ProcessWire " . self::minVersion . " or newer."); 
+        }
+
+        //add required field to user template
+        $template = wire('templates')->get("user");
+
+       	$f = $this->wire('fields')->get($this->fieldUrl);
+        if (!$f->id) {
+	    	$f = new Field(); 
+			$f->type = $this->modules->get('FieldtypeText'); 
+			$f->name = $this->fieldUrl;
+			$f->label = "Subscribers url";
+			$f->collapsed = true;
+			$f->columnWidth = 50;
+			$f->save();
+		}
+		$template->fields->add($f);
+
+		$f = $this->fields->get($this->fieldAuth);
+        if (!$f->id) {
+	    	$f = new Field(); 
+			$f->type = $this->modules->get('FieldtypeText'); 
+			$f->name = $this->fieldAuth;
+			$f->label = "Subscribers auth";
+			$f->collapsed = true;
+			$f->columnWidth = 50;
+			$f->save();
+		}
+		$template->fields->add($f);
+
+		$template->fields->save();
+		$this->message('Two fields added to user template');
+    }
+
+	/**
+	 * Uninstall module
+	 *
+	 */
+	public function ___uninstall() {
+
+		$template = wire('templates')->get("user");
+		$fgroup = $template->fieldgroup;
+		$fgroup->remove($this->fieldAuth);
+		$fgroup->remove($this->fieldUrl);
+		$fgroup->save();
+    	// find and delete created fields
+		$fields = array($this->fieldAuth, $this->fieldUrl);
+		foreach ($fields as $field) {
+					$f = $this->wire('fields')->get($field);
+					if($f->id) $this->wire('fields')->delete($f);	
+					$this->message('Deleted created fields');
+		}
+
+	}
+
+    static public function getModuleConfigInputfields(array $data) {
+		$data = array_merge(self::$defaults, $data);
+
+        $fields = new InputfieldWrapper();
+        $modules = Wire::getFuel('modules');
+
+        $fset = wire('modules')->get("InputfieldFieldset");
+        $fset->label = 'User action';
+        $fset->collapsed = Inputfield::collapsedNever;
+
+        $field = $modules->get("InputfieldPageListSelect");
+        $field->attr('name', 'answerUrl');
+        $field->label = __("Page after user action", __FILE__);
+        $field->attr('value', $data['answerUrl']); 
+        $field->description = __("This page should output module's 'renderAnswer' function", __FILE__);
+        $field->columnWidth = 50;
+        $fset->append($field);
+
+        $field = $modules->get('InputfieldText');
+		$field->attr('name', 'subscribeMsg');
+		$field->attr('size', 0);
+		$field->attr('value', $data['subscribeMsg']);
+		$field->label = 'Subscribe message';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'confirmMsg');
+		$field->attr('size', 0);
+		$field->attr('value', $data['confirmMsg']);
+		$field->label = 'Confirmation message';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'unsubscribeMsg');
+		$field->attr('size', 0);
+		$field->attr('value', $data['unsubscribeMsg']);
+		$field->label = 'Unsubscribe message';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'errorMsg');
+		$field->attr('size', 0);
+		$field->attr('value', $data['errorMsg']);
+		$field->label = 'This text will be added to every error message';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'existsMsg');
+		$field->attr('size', 0);
+		$field->attr('value', $data['existsMsg']);
+		$field->label = 'User is in a list';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$fields->add($fset);
+
+        $fset = wire('modules')->get("InputfieldFieldset");
+        $fset->label = 'Confirmation email';
+        $fset->collapsed = Inputfield::collapsedNever;
+
+        $field = $modules->get('InputfieldText');
+		$field->attr('name', 'from');
+		$field->attr('size', 0);
+		$field->attr('value', $data['from']);
+		$field->label = 'Sent from';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldText');
+		$field->attr('name', 'subject');
+		$field->attr('size', 0);
+		$field->attr('value', $data['subject']);
+		$field->label = 'Subject';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldTextarea');
+		$field->attr('name', 'bodyHtml');
+		$field->attr('rows', 5); 
+		$field->attr('value', $data['bodyHtml']);
+		$field->label = 'HTML body';
+		$field->notes = 'Use {{LINK}} for confirmation link';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$field = $modules->get('InputfieldTextarea');
+		$field->attr('name', 'body');
+		$field->attr('rows', 5); 
+		$field->attr('value', $data['body']);
+		$field->label = 'Plain text body';
+		$field->notes = 'Use {{LINK}} for confirmation link';
+		$field->columnWidth = 50;
+		$fset->append($field);
+
+		$fields->add($fset);
+
+		$field = $modules->get('InputfieldInteger');
+		$field->attr('name', 'salt');
+		$field->attr('size', 0);
+		$field->attr('value', ($data['salt'] === 0) ? self::genSalt() : $data['salt']);
+		$field->label = 'User link authentication salt';
+		$field->notes = "Changing this after install will make all confirmation and unsubscribe link invalid, 
+						but you may wish to provide a value from previous installation to keep link compability.";
+		$field->columnWidth = 50;
+		$field->collapsed = true;
+		$fields->append($field);
+
+        return $fields;
+    }
+
+    /**
+	* get the config either default or overwritten by user config
+	* @param  string $key name of the option
+	* @return mixed  return requested option value
+	*/
+	public function config($key) {
+		return ($this->get($key)) ? $this->get($key) : self::$defaults[$key];
+	}
+
+}
