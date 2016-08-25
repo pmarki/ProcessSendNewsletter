@@ -1,4 +1,4 @@
-# Newsletter solution for ProcessWire 3.0+
+# Newsletter solution for ProcessWire 2.8+
 
 This module provides a UI for sending newsletters
 
