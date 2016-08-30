@@ -152,7 +152,6 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	 * @param bool $includeUnconfirmed Export also those who didn't click confirmation link
 	 *
 	 */
-
 	public function exportToCSV($includeUnconfirmed) {
 		$csvFileName = 'subscribersList.csv';
 
@@ -178,7 +177,7 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 
 		fclose($f);
 		exit;		
-}
+	}
 
 	/**
 	 * Render subscribers list

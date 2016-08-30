@@ -45,6 +45,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			'fromEmail' => 'newsletter@yourdomain.com',
 			'fromName' => 'My website newsletter',
 			'backendPass' => '',
+			'hideActionText' => false,
+			'hideActionLink' => false,
 		);
 
 	//names of fields used during install
@@ -145,19 +147,23 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f->required = true; 
 		$tab->add($f);
 
-		$f = $this->modules->get('InputfieldText'); 
-		$f->attr('name', 'newsletter_button_text'); 
-		$f->attr('value', $this->actionText);
-		$f->label = $this->_('Button text'); 
-		$f->columnWidth = 50; 
-		$tab->add($f);
+		if (!$this->config('hideActionText')) {
+			$f = $this->modules->get('InputfieldText'); 
+			$f->attr('name', 'newsletter_button_text'); 
+			$f->attr('value', $this->actionText);
+			$f->label = $this->_('Button text'); 
+			$f->columnWidth = 50; 
+			$tab->add($f);
+		}
 
-		$f = $this->modules->get('InputfieldURL'); 
-		$f->attr('name', 'newsletter_button_link'); 
-		$f->attr('value', $this->actionLink);
-		$f->label = $this->_('Button link'); 
-		$f->columnWidth = 50; 
-		$tab->add($f);
+		if (!$this->config('hideActionLink')) {
+			$f = $this->modules->get('InputfieldURL'); 
+			$f->attr('name', 'newsletter_button_link'); 
+			$f->attr('value', $this->actionLink);
+			$f->label = $this->_('Button link'); 
+			$f->columnWidth = 50; 
+			$tab->add($f);
+		}
 
 		$f = $this->modules->get('InputfieldSelect'); 
 		$f->attr('name', 'newsletter_group'); 
@@ -1002,6 +1008,24 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$field->attr('size', 50);
 		$field->attr('value', $data['fromEmail']);
 		$field->label = 'Email "from:" field - email';
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldCheckbox');
+		$field->attr('name', 'hideActionLink');
+		$field->attr('size', 50);
+		$field->setAttribute('checked', $data['hideActionLink'] ? 'checked' : ''); 
+		$field->label = 'Hide button link field';
+		$field->description = "Check this if you don't want to show action link field while creating emails";
+		$field->columnWidth = 50;
+		$fields->append($field);
+
+		$field = $modules->get('InputfieldCheckbox');
+		$field->attr('name', 'hideActionText');
+		$field->attr('size', 50);
+		$field->setAttribute('checked', $data['hideActionText'] ? 'checked' : ''); 
+		$field->label = 'Hide button text field';
+		$field->description = "Check this if you don't want to show action text field while creating emails";
 		$field->columnWidth = 50;
 		$fields->append($field);
 
