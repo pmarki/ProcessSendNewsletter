@@ -62,9 +62,8 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	    		echo json_encode( array('result' => $result));
 	    		exit;
 			} else {
-				$error = __("Error: ").$result . '<br>'. $this->config('errorMsg');
-				wire('session')->set("subsc_message", 
-							($result===true) ? $this->config('subscribeMsg') : $error);
+				$error = __("Error: ").$result . ' '. $this->config('errorMsg');
+				wire('session')->set("subsc_message", ($result===true) ? $this->config('subscribeMsg') : $error);
 				wire('session')->redirect( $this->pages->get('id='.$this->config('answerUrl'))->url);
 			}
 		}
@@ -76,9 +75,8 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	    		echo json_encode( array('result' => $result));
 	    		exit;
 			} else {
-				$error =  $this->config('errorMsg');
-				wire('session')->set("subsc_message", 
-							($result===true) ? $this->config('errorMsg') : $error);
+				$error =  __("Error: ").$result . ' '. $this->config('errorMsg');
+				wire('session')->set("subsc_message", ($result===true) ? $this->config('confirmMsg') : $error);
 				wire('session')->redirect($this->pages->get('id='.$this->config('answerUrl'))->url);
 			}
 		}
@@ -91,8 +89,7 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	    		exit;
 			} else {
 				$error = __("Error: ").$result . ' '. $this->config('errorMsg');
-				wire('session')->set("subsc_message", 
-							($result===true) ? $this->config('errorMsg') : $this->wire('sanitizer')->text($error) );
+				wire('session')->set("subsc_message", ($result===true) ? $this->config('unsubscribeMsg') : $error);
 				wire('session')->redirect( $this->pages->get('id='.$this->config('answerUrl'))->url);
 			}
 		}
@@ -147,6 +144,32 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	    if ($err) $out .= "<br>Error in adding: " . $err;
 		return $out;
 
+	}
+
+	/**
+	 * Render subscribers list
+	 * 
+	 * @return string Admin Data Table markup with pagination
+	 *
+	 */
+	public function renderSubscribersList() {
+		$table = wire('modules')->get("MarkupAdminDataTable");
+		//$table->setEncodeEntities(false);
+		//$table->setCaption('Lista');
+		$table->headerRow(["Email", "Groups", "Added"]);
+
+		$pageArr = $this->wire('users')->find("roles=newsletter|'', limit=50");
+		$pagination = $pageArr->renderPager();
+		foreach($pageArr as $p){
+			$role = ($p->hasRole('newsletter')) ? 'Newsletter' : 'Unconfirmed';
+			$data = array(
+		    	$p->email,
+		    	$role,
+		    	date("F j, Y", $p->modified),
+		  	);
+		  	$table->row($data);
+		}
+		return $table->render() . $pagination;
 	}
 
 	/**
@@ -398,7 +421,6 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	 *
 	 */
 	protected function decodeDate($string) {
-		echo $string;
 	  	$date = base64_decode(urldecode($string));
 	  	$time = intval($date);
 	  	if ($time > 1)

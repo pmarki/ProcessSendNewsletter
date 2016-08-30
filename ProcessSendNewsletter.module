@@ -40,8 +40,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			'unsubscribeUrl' => 'subscribers_url',
 			'senderRole' => 'superuser',
 			'receiverRole' => 'newsletter',
-			'backend' => ',
-			'useNames' => ',
+			'backend' => '',
+			'useNames' => '',
 			'fromEmail' => 'newsletter@yourdomain.com',
 			'fromName' => 'My website newsletter',
 			'backendPass' => '',
@@ -129,10 +129,42 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$tab->attr('id', $id); 
 		$tab->class .= ' WireTab';
 
+		$f = $this->modules->get('InputfieldText'); 
+		$f->attr('name', 'newsletter_title'); 
+		$f->attr('value', $this->title);
+		$f->label = $this->_('Email subject'); 
+		$f->columnWidth = 50; 
+		$f->required = true; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldTextarea'); 
+		$f->attr('name', 'newsletter_body'); 
+		$f->attr('value', $this->body);
+		$f->label = $this->_('Email text'); 
+		$f->description = 'Text added as header: <<' .$this->data['header'] . '>> Text added as footer: <<' .$this->data['footer'] .'>>' ;
+		$f->attr('rows', 5); 
+		$f->required = true; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldText'); 
+		$f->attr('name', 'newsletter_button_text'); 
+		$f->attr('value', $this->actionText);
+		$f->label = $this->_('Button text'); 
+		$f->columnWidth = 50; 
+		$tab->add($f);
+
+		$f = $this->modules->get('InputfieldURL'); 
+		$f->attr('name', 'newsletter_button_link'); 
+		$f->attr('value', $this->actionLink);
+		$f->label = $this->_('Button link'); 
+		$f->columnWidth = 50; 
+		$tab->add($f);
+
 		$f = $this->modules->get('InputfieldSelect'); 
 		$f->attr('name', 'newsletter_group'); 
-		$f->label = $this->_('Send to:'); 
+		$f->label = $this->_('Newsletter group - send to:'); 
 		$f->columnWidth = 30; 
+		$f->collapsed = Inputfield::collapsedYes; 
 		foreach ($this->config('receiverRole') as $role) {
 			$arr = ($this->newsletterGroup == $role ?  array("selected" => 1) : array());
 			$count = $this->wire('users')->count("roles=" . $role);
@@ -153,6 +185,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f->label = $this->_('Template'); 
 		$f->columnWidth = 30; 
 		$f->required = true; 
+		$f->collapsed = Inputfield::collapsedYes; 
 		//find available templates
 		$files = scandir(dirname ( __FILE__ ) . "/templates");
 		foreach ($files as $file) {
@@ -175,36 +208,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f->value = "<img src='{$this->getTemplateImage($templateFileName)}' alt='Unable to find template preview'/>";
 		$f->label = $this->_('Template preview'); 
 		$f->columnWidth = 40; 
-		$tab->add($f);
-
-		$f = $this->modules->get('InputfieldText'); 
-		$f->attr('name', 'newsletter_title'); 
-		$f->attr('value', $this->title);
-		$f->label = $this->_('Email subject'); 
-		$f->columnWidth = 50; 
-		$f->required = true; 
-		$tab->add($f);
-
-		$f = $this->modules->get('InputfieldTextarea'); 
-		$f->attr('name', 'newsletter_body'); 
-		$f->attr('value', $this->body);
-		$f->label = $this->_('Email text'); 
-		$f->attr('rows', 5); 
-		$f->required = true; 
-		$tab->add($f);
-
-		$f = $this->modules->get('InputfieldText'); 
-		$f->attr('name', 'newsletter_button_text'); 
-		$f->attr('value', $this->actionText);
-		$f->label = $this->_('Button text'); 
-		$f->columnWidth = 50; 
-		$tab->add($f);
-
-		$f = $this->modules->get('InputfieldURL'); 
-		$f->attr('name', 'newsletter_button_link'); 
-		$f->attr('value', $this->actionLink);
-		$f->label = $this->_('Button link'); 
-		$f->columnWidth = 50; 
+		$f->collapsed = Inputfield::collapsedYes; 
 		$tab->add($f);
 
 		$f = $this->modules->get('InputfieldHidden');
@@ -343,6 +347,13 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$f->attr('name', 'submit_import'); 
 			$f->attr('value', $this->_('Import')); 
 			$f->icon = 'paper-plane';
+			$tab->add($f);
+
+			$f = $this->modules->get('InputfieldMarkup'); 
+			$f->label = "Subscribers";
+			$f->attr('name', 'subscribersList'); 
+			$subscribers = wire('modules')->get('Subscribers');
+			$f->attr('value', $subscribers->renderSubscribersList()); 
 			$tab->add($f);
 		}
 
@@ -516,7 +527,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$file = dirname( __FILE__ ) . "/" . $this->config('backend');
 		if (!file_exists($file)) return "Unable to find backend file.";
 		require($file);
-		if (!function_exists('ProcessWire\send')) return "Provided backend file is corrupted.";
+		if (!function_exists('send')) return "Provided backend file is corrupted.";
 
 		$credentials = array('name' => $this->config('fromName'),
 							'email' => $this->config('fromEmail'),
