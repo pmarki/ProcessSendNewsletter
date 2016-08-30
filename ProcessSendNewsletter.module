@@ -64,6 +64,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	protected $newsletterGroup = "";
 	protected $pageName = "";
 
+	protected $log = 'newsletter';
+
 	protected static $status = array(
 			'SENT' 	=> 'SENT', 
 			'SAVED'	=> 'SAVED',
@@ -94,7 +96,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	 */
 	protected function setup() {
 
-		if (!$this->user->hasRole($this->config('senderRole'))  || !$this->user->hasPermission('newsletter-sender') ) {
+		if (!$this->user->hasRole($this->config('senderRole'))  || !$this->user->hasPermission('newsletter-sender')) {
 			$this->error("Sorry, but you can't send newsletters. Ask administrator for a permission");
 			return false;
 		}
@@ -378,11 +380,30 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$fset->add($f);
 
 			$tab->add($fset);
-
-
+			$form->add($tab);
 		}
 
-		$form->add($tab);
+		if (wire('user')->hasPermission('logs-view') ) {
+			//fourth tab - logs
+			$tab = new InputfieldWrapper();
+			$tab->attr('title', $this->_('Logs')); 
+			$id = $this->className() . 'logs';
+			$tab->attr('id', $id); 
+			$tab->class .= ' WireTab';
+
+			$logs = wire('log')->getEntries($this->log);
+			$table = wire('modules')->get("MarkupAdminDataTable");
+			$table->headerRow( ["Date/Time", "User","Message"]);
+			foreach ($logs as $log ) {
+				$table->row(array($log['date'] , $log['user'],$log['text'] ));
+			}
+			$f = $this->modules->get('InputfieldMarkup'); 
+			$f->label = 'Newsletter logs';
+			$f->attr('name', 'newsletterLogs'); 
+			$f->attr('value', $table->render()); 
+			$tab->add($f);
+			$form->add($tab);
+		}
 		return $form;
 	}
 
@@ -574,6 +595,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 				$this->message("Test message was sent to you at " . $this->user->email);
 			} else {
 				$this->error("Error sending newsletter: " .$result);
+				$this->wire('log')->save($this->log, "TEST Error: $result");
 			}
 			$this->fillFields();
 			return $this->renderNewsletter();
@@ -581,9 +603,11 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		if ($result !== true) {
 			$this->saveNewsletterPage(self::$status['ERROR']);
+			$this->wire('log')->save($this->log, "ERROR: $result");
 			return $this->_("<h2>Error sending newsletter </h2>") .$result;
 		}
 		$this->saveNewsletterPage(self::$status['SENT']);
+		$this->wire('log')->save($this->log, "SENT: {$this->title}");
 		return $this->_("<h2>Sent successfully to subscribers</h2>");
 	}
 
