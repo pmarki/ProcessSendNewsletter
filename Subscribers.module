@@ -147,6 +147,40 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	}
 
 	/**
+	 * Export list of subscribers to csv
+	 * 
+	 * @param bool $includeUnconfirmed Export also those who didn't click confirmation link
+	 *
+	 */
+
+	public function exportToCSV($includeUnconfirmed) {
+		$csvFileName = 'subscribersList.csv';
+
+		//force download. disposition / encoding on response body
+		header('Content-type: text/csv');
+		header("Content-Disposition: attachment;filename={$csvFileName}");
+		//disable caching
+		header('Pragma: no-cache');
+		header('Expires: 0');
+
+		$f = fopen("php://output", 'w');
+
+		$roles = ($includeUnconfirmed) ? "newsletter|''" : "newsletter";
+		$pageArr = $this->wire('users')->find("roles=$roles");
+		$data = array();
+		foreach($pageArr as $p){
+			$data[] = array('email' => $p->email);
+		}
+		//keys of associative array $data will be the column headers
+		fputcsv($f, array_keys(reset($data)));
+		//write to csv file
+		foreach ($data as $row) fputcsv($f, $row);
+
+		fclose($f);
+		exit;		
+}
+
+	/**
 	 * Render subscribers list
 	 * 
 	 * @return string Admin Data Table markup with pagination

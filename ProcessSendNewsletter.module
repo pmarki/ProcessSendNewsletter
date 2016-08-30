@@ -81,7 +81,6 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$this->config->scripts->add($this->config->urls->ProcessSendNewsletter . 'wysiwyg/trumbowyg.js');
 		$url = $this->config->url('page'); 
 		$this->config->js('iconPath', $url);
-//site/modules/ProcessSendNewsletter/wysiwyg/ui/icons.svg';
 		parent::init();
 	}
 
@@ -333,6 +332,19 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$id = $this->className() . 'Subscribers';
 			$tab->attr('id', $id); 
 			$tab->class .= ' WireTab';
+
+			$f = $this->modules->get('InputfieldMarkup'); 
+			$f->label = "Subscribers";
+			$f->attr('name', 'subscribersList'); 
+			$subscribers = wire('modules')->get('Subscribers');
+			$f->attr('value', $subscribers->renderSubscribersList()); 
+			$tab->add($f);
+
+			$fset = $this->modules->get('InputfieldFieldset');
+			$fset->label = $this->_('Import/Export'); 
+			$id = $this->className() . 'import';
+			$fset->attr('id', $id); 
+			$fset->collapsed = Inputfield::collapsedYes; 
 			
 			$f = $this->modules->get('InputfieldTextarea'); 
 			$f->attr('name', 'subscribersCsv'); 
@@ -341,20 +353,23 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$f->description = "Paste emails to import, each in a new line";
 			$f->attr('rows', 5); 
 			$f->collapsed = 5; 
-			$tab->add($f);
+			$fset->add($f);
 
 			$f = $this->modules->get('InputfieldSubmit'); 
 			$f->attr('name', 'submit_import'); 
 			$f->attr('value', $this->_('Import')); 
 			$f->icon = 'paper-plane';
-			$tab->add($f);
+			$fset->add($f);
 
-			$f = $this->modules->get('InputfieldMarkup'); 
-			$f->label = "Subscribers";
-			$f->attr('name', 'subscribersList'); 
-			$subscribers = wire('modules')->get('Subscribers');
-			$f->attr('value', $subscribers->renderSubscribersList()); 
-			$tab->add($f);
+			$f = $this->modules->get('InputfieldSubmit'); 
+			$f->attr('name', 'submit_export'); 
+			$f->attr('value', $this->_('Export')); 
+			$f->icon = 'paper-plane';
+			$fset->add($f);
+
+			$tab->add($fset);
+
+
 		}
 
 		$form->add($tab);
@@ -391,6 +406,8 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$this->session->redirect($this->page->url . "LoadPage/?pageName=".$this->pageName);
 		} else if ($this->input->post('submit_import')) {
 			return $this->executeImport();
+		}if ($this->input->post('submit_export')) {
+			return $this->executeExport();
 		} else {
 			return $this->renderNewsletter();
 		}
@@ -461,6 +478,11 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			return $subscribers->importSubscribers($this->input->post('subscribersCsv'));
 
 		} 
+	}
+
+	public function executeExport() {
+		$subscribers = wire('modules')->get('Subscribers');
+		return $subscribers->exportToCsv(false);
 	}
 
 	/**
