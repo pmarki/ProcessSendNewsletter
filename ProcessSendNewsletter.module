@@ -217,6 +217,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 
 		$f = $this->modules->get('InputfieldSubmit'); 
 		$f->attr('name', 'submit_send'); 
+		$f->attr('title', $this->_('Send this newsletter to subscribers'));
 		$f->attr('value', $this->_('Send')); 
 		$f->attr('onclick', "return confirm('" . $this->_('Send newsletter now?') . "')"); 
 		$f->icon = 'paper-plane';
@@ -225,6 +226,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f = $this->modules->get('InputfieldSubmit'); 
 		$f->attr('name', 'submit_test'); 
 		$f->attr('value', $this->_('Test')); 
+		$f->attr('title', $this->_('Send this newslleter to yourself only'));
 		$f->attr('onclick', "return confirm('" . $this->_('Send test newsletter to '.$this->user->email.'?') . "')"); 
 		$f->icon = 'cogs';
 		$tab->add($f);
@@ -232,6 +234,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f = $this->modules->get('InputfieldSubmit'); 
 		$f->attr('name', 'submit_save'); 
 		$f->attr('value', $this->_('Save')); 
+		$f->attr('title', $this->_('You can save a newsletter and go back to it later from "History" tab.'));
 		$f->icon = 'save';
 		$tab->add($f);
 
@@ -239,6 +242,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		$f->attr('name', 'submit_preview'); 
 		$f->attr('id', 'button_preview'); 
 		$f->attr('value', $this->_('Preview')); 
+		$f->attr('title', $this->_('Open a dialog box with a newsletter preview.'));
 		$f->icon = 'binoculars';
 		$f->href = $this->wire('page')->url . 'Preview/?preview=1&modal=1'; 
 		$tab->add($f);
@@ -334,7 +338,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$tab->class .= ' WireTab';
 
 			$f = $this->modules->get('InputfieldMarkup'); 
-			$f->label = "Subscribers";
+			$f->label = '';
 			$f->attr('name', 'subscribersList'); 
 			$subscribers = wire('modules')->get('Subscribers');
 			$f->attr('value', $subscribers->renderSubscribersList()); 
@@ -348,7 +352,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			
 			$f = $this->modules->get('InputfieldTextarea'); 
 			$f->attr('name', 'subscribersCsv'); 
-			$f->attr('value', $this->body);
+			$f->attr('value', '');
 			$f->label = $this->_('Import subscribers'); 
 			$f->description = "Paste emails to import, each in a new line";
 			$f->attr('rows', 5); 
@@ -358,13 +362,13 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 			$f = $this->modules->get('InputfieldSubmit'); 
 			$f->attr('name', 'submit_import'); 
 			$f->attr('value', $this->_('Import')); 
-			$f->icon = 'paper-plane';
+			$f->icon = 'cloud-upload';
 			$fset->add($f);
 
 			$f = $this->modules->get('InputfieldSubmit'); 
 			$f->attr('name', 'submit_export'); 
 			$f->attr('value', $this->_('Export')); 
-			$f->icon = 'paper-plane';
+			$f->icon = 'download';
 			$fset->add($f);
 
 			$tab->add($fset);
@@ -403,6 +407,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 		} else if ($this->input->post('submit_save')) {
 			$this->fillFields();
 			$this->saveNewsletterPage(self::$status['SAVED']);
+			$this->message($this->_("Newsletter was saved."));
 			$this->session->redirect($this->page->url . "LoadPage/?pageName=".$this->pageName);
 		} else if ($this->input->post('submit_import')) {
 			return $this->executeImport();
@@ -628,8 +633,7 @@ class ProcessSendNewsletter extends Process implements ConfigurableModule {
 	}
 
 	/**
-	 * Save ready to send newsletter
-	 * @return bool $onlySaved page will be only saved, not sent
+	 * Save newsletter as a page
 	 *
 	 */
 	protected function saveNewsletterPage($status) {

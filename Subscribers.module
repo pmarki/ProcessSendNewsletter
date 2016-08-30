@@ -189,10 +189,10 @@ class Subscribers extends WireData implements Module, ConfigurableModule {
 	public function renderSubscribersList() {
 		$table = wire('modules')->get("MarkupAdminDataTable");
 		//$table->setEncodeEntities(false);
-		//$table->setCaption('Lista');
+		$table->setCaption('There are ' . wire('users')->count('roles=newsletter') . ' subscribers');
 		$table->headerRow(["Email", "Groups", "Added"]);
 
-		$pageArr = $this->wire('users')->find("roles=newsletter|'', limit=50");
+		$pageArr = $this->wire('users')->find("roles=newsletter|'', limit=25");
 		$pagination = $pageArr->renderPager();
 		foreach($pageArr as $p){
 			$role = ($p->hasRole('newsletter')) ? 'Newsletter' : 'Unconfirmed';
